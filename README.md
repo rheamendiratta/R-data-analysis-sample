@@ -15,6 +15,6 @@ I was given simulated administrative data from the Cook County State’s Attorne
 
 6. Estimated the relationship between treatment assignment and re-arrest using statistical models
 
-The datasets are in the repository and the full analysis exercise can be accessed through the Rmd file.
+The datasets are in the repository and the full analysis exercise can be accessed through the markdown or PDF files.
 
 (Note: Data were generated/manipulated for assessment purposes and are not intended for real-world inference.)
