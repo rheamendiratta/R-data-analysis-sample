@@ -1,0 +1,322 @@
+---
+title: "R Data Analysis Sample"
+author: "Rhea Mendiratta"
+
+output:
+  pdf_document:
+    latex_engine: xelatex
+header-includes:
+  - \usepackage{fvextra}
+  - \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Assignment Instructions
+
+**Suppose that, in January 2020, the Cook County State’s Attorney’s Office established a program aimed at lowering recidivism rates in Chicago. The program ran for a year, concluding on December 31, 2020. The agency monitored the outcomes for two years after the program concluded on December 31, 2022. Of the individuals eligible for the program, approximately half were randomly assigned to the program (known as the treatment group). The agency asked you to evaluate the effectiveness of the program and provided the data described below.**
+
+**There are three datasets:**
+
+1.  **program_cases.csv: This dataset serves as the main dataset and contains information on whether the arrestee was referred to the intervention program (i.e., whether they were randomly assigned to the treatment or control group), as well as some demographic variables.**
+
+2.  **crimes.csv: This dataset contains information for crimes in the Chicago area from 2017 through 2022.**
+
+3.  **arrests.csv: This dataset contains information on arrests in the Chicago area from 2017 through 2022.**
+
+***Note: These datasets were generated specifically for this assessment based on public data. The data was manipulated for assessment purposes. Do not use this data for other purposes or assume inferences from the data are valid outside of this exercise.***
+
+Installing libraries I'll need
+
+```{r}
+library(tidyverse)
+library(data.table)
+library(lubridate)
+library(lmtest)
+library(sandwich)
+library(broom)
+library(tinytex)
+
+```
+
+## Part A: Data Management
+
+### Question 1
+
+**The race variable in the program cases dataset combines both race data and Hispanic ethnicity data (e.g., there are distinct categories for “White” and “White Hispanic”). Recode this variable into two variables so that one variable represents race, and one represents Hispanic ethnicity status. How many arrestees in the full program sample are of Hispanic ethnicity?**
+
+Reading data
+
+```{r}
+program_cases <- read.csv("program_cases.csv")
+str(program_cases)
+```
+
+Recoding the "race" variable into the following two variables: 1. A binary variable (hispanic_ethnicity) where "1" denotes that the individual's original race category includes "Hispanic" and "0" denotes otherwise. and 2. A new race variable (race_only) with no "Hispanic" distinction
+
+```{r}
+program_cases <- program_cases %>%
+  mutate(
+    hispanic_ethnicity = case_when(
+      grepl("HISPANIC", race) ~1,
+      TRUE ~ 0
+    ),
+    race_only = case_when(
+   grepl("HISPANIC", race) ~ gsub(" HISPANIC", "", race),
+   TRUE ~ race
+    )
+  )
+```
+
+Calculating the number of arrestees in the full sample of Hispanic ethnicity
+
+```{r}
+hispanic_count <- sum(program_cases$hispanic_ethnicity)
+print(hispanic_count)
+```
+
+There are 848 arrestees in the full program sample of Hispanic ethnicity.
+
+### Question 2
+
+\*\*The arrests dataset contains details on the alleged offenses, while the crimes data contains information on each crime, including where it occurred. Merge the arrests and crimes datasets together so that the resulting dataset contains only arrest records that have a corresponding crime record. Note that, due to administrative data errors, the datasets might not perfectly align. How many rows are in the resulting dataset?
+
+Reading data
+
+```{r}
+arrests <- read.csv("arrests.csv")
+crimes <- read.csv("crimes.csv")
+```
+
+Merging the arrests dataset with the crimes dataset using "case_number" as the matching variable
+
+```{r}
+merged_data <- arrests %>%
+  inner_join(crimes, by = "case_number")
+str(merged_data)
+```
+
+No. of rows in the resulting dataset
+
+```{r}
+merged_rows <- nrow(merged_data)
+print(merged_rows)
+```
+
+There are 38128 rows in the resulting dataset.
+
+### Question 3
+
+**While the majority of the records in the crimes dataset occurred in Chicago, some crimes occurred outside of Chicago. For the purpose of this analysis, please restrict the dataset created in question 2 to only crimes with a corresponding arrest within Chicago. How many rows are now in the new dataset?**
+
+Filtering the merged_data to include only crimes that occurred in Chicago using the "address" variable
+
+```{r}
+chicago_merged_data <- merged_data %>%
+  filter(grepl("CHICAGO", address))
+```
+
+Rows in the new dataset
+
+```{r}
+chicago_merged_rows <- nrow(chicago_merged_data)
+print(chicago_merged_rows)
+```
+
+There are 35797 rows in the new dataset.
+
+## Part B: Variable Creation
+
+### Question 4
+
+**The arrest dataset contains up to 4 independent charges that resulted from each arrest. Using the filtered data from question 3, create indicator variables to denote if an arrest included charges for:**
+
+1.  **Homicide (statute 720 ILCS 5.0/9-1-A-1 or 720 ILCS 5.0/9-1-A-2 or 720 ILCS 5.0/9-1-A-3)**
+
+2.  **Weapons Violation (statute 720 ILCS 5.0/24-1.6-A-1 or 720 ILCS 5.0/24- 1.1-A)**
+
+***Note: The partner who provided the arrest data has indicated that a revised dataset that records up to 20 independent charges for each arrest may be available to researchers shortly. The principal investigator will want to incorporate those additional charges into the analysis. We encourage you to write your solution in a way that allows you to incorporate the additional data quickly.***
+
+**How many arrests include a homicide charge?**
+
+Defining the statutes and creating indicator variables by checking all "charge_x_statute" columns for the specified statutes.
+
+```{r}
+homicide_statutes <- c("720 ILCS 5.0/9-1-A-1", "720 ILCS 5.0/9-1-A-2", "720 ILCS 5.0/9-1-A-3")
+weapons_statutes <- c("720 ILCS 5.0/24-1.6-A-1", "720 ILCS 5.0/24-1.1-A")
+
+chicago_merged_data <- chicago_merged_data %>%
+  mutate(
+    homicide_charge = as.integer(if_any(matches("charge_\\d+_statute"), ~ .x %in% homicide_statutes)),
+    weapons_charge = as.integer(if_any(matches("charge_\\d+_statute"), ~ .x %in% weapons_statutes))
+  )
+```
+
+Number of arrests with a homicide charge
+
+```{r}
+homicide_number <- sum(chicago_merged_data$homicide_charge, na.rm = TRUE)
+print(homicide_number)
+
+#verifying that my code for weapons_charge worked
+weapons_number <- sum(chicago_merged_data$weapons_charge, na.rm = TRUE)
+print(weapons_number)
+```
+
+228 arrests include a homicide charge.
+
+### Question 5
+
+**The program cases dataset contains an indicator variable (arrest_after_program) denoting if the subject had an arrest after the date they were assigned to enroll in the program (program_date). Recreate this variable using the resulting data from question 4 to confirm it was coded correctly. Show that the original variable equals the newly created variable.**
+
+Creating a separate dataset containing only post-program arrests by using person_id to find each individual's program date. Then, getting all unique person_ids with a post-program arrest to create a fresh indicator variable. Then, merging this data with the program_cases dataset and setting our indicator to 0 for anyone who doesn't appear in the post-program arrest dataset.
+
+```{r}
+recreated_arrest_data <- chicago_merged_data %>%
+  left_join(program_cases %>% select(person_id, program_date), by = "person_id") %>%
+  filter(arrest_date > program_date) %>%
+  distinct(person_id) %>%
+  mutate(recreated_arrest_after_program = 1)
+
+program_cases <- program_cases %>%
+  left_join(recreated_arrest_data%>% select(person_id, recreated_arrest_after_program), 
+            by = "person_id") %>%
+  mutate(recreated_arrest_after_program = ifelse(is.na(recreated_arrest_after_program), 0, 1))
+```
+
+Comparing the original arrest_after_program variable with the recreated_arrest_after_program variable
+
+```{r}
+match_percentage <- mean(program_cases$arrest_after_program == program_cases$recreated_arrest_after_program, na.rm = TRUE) *100
+print(match_percentage)
+```
+
+The original variable equals the newly created variable since 100% of the cases have matching values.
+
+## Part C: Statistical Analysis
+
+### Question 6
+
+**Are the treatment and control groups balanced on the demographics available in the program cases file (i.e., race, gender, and age), or are there any significant differences in the composition of the two groups? Please perform any appropriate statistical tests and present your answer in the form of a table.**
+
+Creating a balance table comparing demographics between the treatment and control groups
+
+```{r}
+#finding all unique values in the race_only variable
+unique(program_cases$race_only)
+```
+
+```{r}
+balance_table <- program_cases %>%
+  group_by(treatment) %>%
+  summarise(
+    n = n(),
+    mean_age = mean(age_at_enrollment, na.rm = TRUE), 
+    prop_male = mean(gender=="M", na.rm = TRUE), 
+    prop_hispanic = mean(hispanic_ethnicity, na.rm = TRUE), 
+    prop_white = mean(race_only == "WHITE", na.rm = TRUE),
+    prop_black = mean(race_only == "BLACK", na.rm = TRUE),
+    prop_other_race = mean(race_only == "OTHER/UNKNOWN/REFUSED", na.rm = TRUE)
+  )
+
+print(balance_table)
+```
+
+Conducting Statistical Tests (t-test for age and chi-square for others) and compiling p-values
+
+```{r}
+age_test <- t.test(age_at_enrollment ~ treatment, data = program_cases)
+gender_test <- chisq.test(table(program_cases$gender, program_cases$treatment))
+hispanic_test <- chisq.test(table(program_cases$hispanic_ethnicity, program_cases$treatment))
+race_test <- chisq.test(table(program_cases$race_only, program_cases$treatment))
+
+balance_p_values <- data.frame(
+  Variable = c("Age", "Gender", "Hispanic", "Race"),
+  P_Value = c(age_test$p.value, gender_test$p.value, hispanic_test$p.value, race_test$p.value)
+)
+
+print(balance_p_values)
+```
+
+The following p-values of the demographics of the treatment and control groups suggest that they are not balanced in age, but are balanced in other demographic characteristics, indicating partially successful randomization.
+
+Assuming an α = 0.05, there is a statistically significant difference between the average age of the treatment and control groups.
+
+| Variable           | p-value   |
+|--------------------|-----------|
+| Age                | 0.0000000 |
+| Gender             | 0.8849579 |
+| Hispanic Ethnicity | 0.4287301 |
+| Race               | 0.1283638 |
+
+### Question 7
+
+**Choose one baseline characteristic and construct a graph that shows the difference between those who were assigned to the program and those who were not. The graph should be appropriate for sharing with the study’s external partner (i.e., the State’s Attorney’s Office).**
+
+Creating an age-distribution plot by treatment status
+
+```{r}
+ggplot(program_cases, aes(x = age_at_enrollment, fill = factor(treatment))) +
+  geom_density(alpha = 0.5) +
+  scale_fill_manual(values = c("#FF7F0E", "#003366"), 
+                    labels = c("Control Group", "Treatment Group"),
+                    name = "Assignment") +
+  labs(
+    title = "Age Distribution by Program Assignment",
+    subtitle = "Cook County State's Attorney's Office Recidivism Reduction Program",
+    x = "Age at Enrollment",
+    y = "Density"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 12),
+    legend.position = "bottom"
+  )
+```
+
+### Question 8
+
+**Evaluate the relationship between assignment to the program and re-arrest. Did assignment to the treatment reduce the likelihood of re-arrest? In answering this question, please perform any appropriate statistical modeling. Explain your methodology and your results.**
+
+Using a linear regression model to evaluate the relationship between program assignment and re-arrest
+
+```{r}
+linear_model <- lm(arrest_after_program ~ treatment, data = program_cases)
+summary(linear_model)
+
+adjusted_model <- lm(arrest_after_program ~ treatment + age_at_enrollment + 
+                      gender + race_only + hispanic_ethnicity, 
+                      data = program_cases)
+summary(adjusted_model)
+```
+
+To evaluate the program’s impact on recidivism, I estimated two linear regression models. The linear model included only the treatment assignment as a regressor, while the adjusted model incorporated demographic covariates (age, race, gender, and Hispanic ethnicity) to account for potential confounding factors. Model fit was assessed using adjusted R-squared values, and statistical significance was determined via p-values.
+
+Summary of linear regression:
+
+|                       |          | Linear Model | Adjusted Model |
+|-----------------------|----------|--------------|----------------|
+| Intercept             | Estimate | 0.351600     | 0.884545       |
+| Intercept             | p-value  | \<2e-16      | \<2e-16        |
+| Treatment Coefficient | Estimate | -0.004400    | -0.220825      |
+| Treatment Coefficient | p-value  | 0.744        | 4.29e-13       |
+| Adjusted $R^2$        |          | -0.0001788   | 0.01208        |
+
+Assignment to the treatment group significantly reduced the likelihood of rearrest, but only after accounting for demographic differences.
+
+In the Linear model, the estimated treatment effect is small (-0.44 percentage points) and statistically insignificant (p = 0.744), suggesting no clear program impact. The model also has an extremely low adjusted R-squared (-0.0001788), indicating it explains virtually none of the variation in rearrest outcomes. This aligns with the non-significant treatment effect.
+
+After controlling for demographic characteristics in the Adjusted model, the treatment effect becomes both substantial and highly significant (p \< 0.001). The coefficient of -0.22 indicates that program participation lowered the probability of rearrest by approximately 22.1 percentage points. The adjusted R-squared improves to 0.01208, which is still modest (explaining about 1.2% of the variance) but a notable improvement over the Linear model. The model is statistically significant (p-value: 4.266e-12).
+
+The stark contrast between these models suggests that key confounding variables were at play. Notably, age is a significant predictor of rearrest (p \<0.001), with older individuals being less likely to reoffend. The Linear model, by failing to account for these differences, understated the program’s impact. Once demographic factors were properly controlled for, the program’s effect became evident.
+
+The Adjusted model, which provides a more accurate assessment, offers strong evidence that the Cook County State’s Attorney’s Office program effectively reduced recidivism. The 22.1 percentage point reduction represents a meaningful improvement in outcomes for those assigned to the program.
+
+### Question 9
+
+**Suppose that the program cases dataset also included an indicator of whom in the treatment group actually participated the program. In 1-2 sentences, what additional analyses would you be able to run using this new information?**
+
+I could run a Treatment-on-the-Treated (TOT) analysis to account for non-compliance to measure the true impact of the program. I could also examine whether participation differs based on demographic factors to help inform the intervention design and implementation.
